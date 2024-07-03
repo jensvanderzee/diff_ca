@@ -1,6 +1,7 @@
 #%%
 import torch
 
+## define constants for the model
 
 # diffusion constants and advection flow rate
 d1, d2, d3, flow_rate = 1.90, 0.0183, 0.065150, 7.75
@@ -20,7 +21,7 @@ water_efficiency = 0.449
 # plant growth nonlinearity factors
 eta, q = 1, 1
 
-
+# define model class
 class NCA(torch.nn.Module):
   def __init__(self, solved=True):
     super().__init__()
@@ -155,6 +156,7 @@ class NCA(torch.nn.Module):
     return h, w, b
 # %%
 
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 import matplotlib.pyplot as plt
 height, width = 100, 100
@@ -166,12 +168,16 @@ plt.colorbar()
 
 
 # %%
+
+# create a model instance 
 true_model = NCA(solved = True).to(device)
 
+# create a flat digital elevation model (this means no effect of topography on advection flow)
 flat_dem = torch.zeros(height, width)[None, None, :].to(device)
 flat_dem_x, flat_dem_y = true_model.gradient_x(flat_dem), true_model.gradient_y(flat_dem)
 
 # %%
+# simulate the model for 100 timesteps to see if it works
 n_steps = 100
 
 h, w, b = h0, w0, b0
@@ -188,21 +194,26 @@ plt.colorbar()
 
 # sets up training loop to see if original parameter values can be retrieved from snapshots of the simulation
 
-
 from tqdm import tqdm
+# create a model instance with randomly initialized parameters
 model = NCA(solved=False).to(device)
 
+# number of iterations to train the model
 n_iter = 800
+# define optimizer and loss function
 optimizer = torch.optim.Adam(model.parameters(), lr = 1e-2)
 loss_function = torch.nn.MSELoss()
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.999)
 
-
+# initialize simulation and prediction states
 sim_h, sim_w, sim_b = h0, w0, b0
 pred_h, pred_w, pred_b = h0, w0, b0
 
+# decrease this to generate more frequent data or increase for less frequent data
 sample_rate = 30
 
+#%%
+# start training loop
 pbar = tqdm(total=n_iter)
 for i in range(n_iter):
   loss=0
@@ -213,9 +224,11 @@ for i in range(n_iter):
     pred_h, pred_w, pred_b = model.forward(pred_h, pred_w, pred_b, flat_dem_x, flat_dem_y)
 
     if k%sample_rate == 0 and k > 0:
+      # compare the simulated and predicted vegetation states (b) of the true model and the trained model
       # one can add the loss of surface water (h) and soil water (w) here to improve training, but we consider these are unobservable in reality
       loss_b = loss_function(pred_b,sim_b)
       loss = loss + loss_b
+  # backpropagate and update model parameters
   optimizer.zero_grad()
   loss.backward()
   optimizer.step()   
@@ -227,4 +240,9 @@ for i in range(n_iter):
                     params.data = params.data.clamp(0,10000)
   pbar.update()
   pbar.set_description("Training loss: %.10f" % (loss) )
+# %%
+# print the true and learned parameter values
+# try different parameters by changing 'd1' to 'd3' or 'infilt_rate'
+print("true value:", true_model.infilt_rate, "\n", "learned value: ", model.infilt_rate.item())
+
 # %%
